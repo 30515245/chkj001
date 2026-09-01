@@ -56,43 +56,7 @@ function loginHtml(error) {
 </html>`;
 }
 
-// 汇总统计：让查看页从"原始表"变成销售能直接用的概览（基于全部数据，作为稳定参考）
-function computeStats(rows) {
-  const total = rows.length;
-  const uniq = new Set(rows.map(r => r.visitor_ip || "")).size;
-  const durs = rows.map(r => parseInt(r.duration, 10) || 0).filter(d => d > 0);
-  const avgDur = durs.length ? Math.round(durs.reduce((a, b) => a + b, 0) / durs.length) : 0;
-  const countBy = (key) => {
-    const m = {};
-    rows.forEach(r => { const v = (r[key] || "").trim(); if (v) m[v] = (m[v] || 0) + 1; });
-    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  };
-  return {
-    total, uniq, avgDur,
-    topPaths: countBy("visit_path"),
-    topSources: countBy("source")
-  };
-}
-
-function statsHtml(s) {
-  const tile = (label, val) =>
-    `<div class="tile"><div class="tv">${esc(val)}</div><div class="tl">${esc(label)}</div></div>`;
-  const list = (label, arr) => arr.length
-    ? `<div class="side"><div class="side-h">${esc(label)}</div>${arr.map(([k, c]) =>
-        `<div class="side-row"><span class="side-k" title="${esc(k)}">${esc(k)}</span><span class="side-c">${c}</span></div>`).join("")}</div>`
-    : "";
-  return `<div class="stats">
-    ${tile("总访问", s.total)}
-    ${tile("独立访客", s.uniq)}
-    ${tile("平均停留", fmtDur(s.avgDur))}
-  </div>
-  <div class="sides">
-    ${list("热门页面", s.topPaths)}
-    ${list("热门渠道", s.topSources)}
-  </div>`;
-}
-
-function tableHtml(rows) {
+function tableHtml(rows, totals) {
   const body = rows.map(r => `<tr data-bot="${r.is_bot || 0}" data-dur="${(parseInt(r.duration,10)||0)}">
     <td>${esc(r.id)}</td>
     <td class="t">${esc(r.visit_time)}</td>
@@ -111,6 +75,8 @@ function tableHtml(rows) {
     referer: r.referer, is_bot: r.is_bot || 0,
     uv_id: r.uv_id || "", uv_key: r.uv_id || r.visitor_ip || "", is_new: r.is_new || 0
   })));
+  // 服务端真总数（跨全库），前端卡片不再受 LIMIT 1000 限制
+  const totalsJson = totals ? JSON.stringify(totals) : "null";
   return `<!doctype html>
 <html lang="zh">
 <head>
@@ -215,6 +181,7 @@ function tableHtml(rows) {
   </div>
 <script>
   const DATA = ${dataJson};
+  const TOTALS = ${totalsJson};
   const statsEl = document.getElementById('stats');
   const fEl = document.getElementById('f');
   const botEl = document.getElementById('bot');
@@ -226,6 +193,23 @@ function tableHtml(rows) {
   function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
   function renderStats(rows){
+    if(TOTALS){
+      const tile=(l,v)=>'<div class="tile"><div class="tv">'+esc(v)+'</div><div class="tl">'+esc(l)+'</div></div>';
+      const side=(l,arr)=>arr.length?'<div class="side"><div class="side-h">'+esc(l)+'</div>'+arr.map(([k,c])=>'<div class="side-row"><span class="side-k" title="'+esc(k)+'">'+esc(k)+'</span><span class="side-c">'+c+'</span></div>').join('')+'</div>':'';
+      const by=k=>{const m={};rows.forEach(r=>{const v=(r[k]||'').trim();if(v)m[v]=(m[v]||0)+1;});return Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,5);};
+      // 概要卡片使用服务端全库真值；热门排序仍随当前筛选实时联动
+      statsEl.innerHTML='<div class="stats">'
+        +tile('总访问', TOTALS.total)
+        +tile('独立访客', TOTALS.uv)
+        +tile('新客', TOTALS.new)
+        +tile('回访', TOTALS.returning)
+        +tile('平均停留', fmtDur(TOTALS.avg_dur))
+        +'</div><div class="sides">'
+        +side('热门页面', by('visit_path'))
+        +side('热门渠道', by('source'))
+        +'</div>';
+      return;
+    }
     const total=rows.length;
     const uv=new Set(rows.map(r=>r.uv_key||'')).size;
     const newUv=new Set(rows.filter(r=>r.uv_id && Number(r.is_new)===1).map(r=>r.uv_id)).size;
@@ -371,11 +355,33 @@ export async function onRequest(context) {
   }
 
   // 已登录 → 查表渲染（提高上限以支持筛选/统计；销售站点流量低，内存安全）
-  const { results } = await env.DB.prepare(
-    "SELECT * FROM visit_record ORDER BY ts DESC, id DESC LIMIT 1000"
-  ).run();
-  const rows = results || [];
-  return new Response(tableHtml(rows), {
+  const [list, agg] = await Promise.all([
+    env.DB.prepare("SELECT * FROM visit_record ORDER BY ts DESC, id DESC LIMIT 1000").run(),
+    env.DB.prepare(`
+      SELECT COUNT(*) AS total,
+        COUNT(DISTINCT CASE WHEN trim(ifnull(uv_id,''))<>'' THEN uv_id ELSE 'ip:'||ifnull(visitor_ip,'') END) AS uv,
+        SUM(CASE WHEN is_bot=1 THEN 1 ELSE 0 END) AS bots,
+        SUM(CASE WHEN duration>0 THEN 1 ELSE 0 END) AS valid,
+        COALESCE(SUM(CASE WHEN duration>0 THEN duration ELSE 0 END),0) AS dur
+      FROM visit_record
+    `).run()
+  ]);
+  const rows = list.results || [];
+  const a = agg.results ? agg.results[0] : {};
+  const newCnt = (await env.DB.prepare("SELECT COUNT(*) c FROM visit_record WHERE is_new=1").first())?.c || 0;
+  const total = Number(a.total) || 0;
+  const uv = Number(a.uv) || 0;
+  const valid = Number(a.valid) || 0;
+  const avgDur = valid ? Math.round(Number(a.dur) / valid) : 0;
+  const totals = {
+    total, uv,
+    bots: Number(a.bots) || 0,
+    valid,
+    avg_dur: avgDur,
+    new: Number(newCnt) || 0,
+    returning: Math.max(0, total - (Number(newCnt) || 0))
+  };
+  return new Response(tableHtml(rows, totals), {
     headers: { "Content-Type": "text/html; charset=utf-8" }
   });
 }

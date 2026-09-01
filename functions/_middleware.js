@@ -18,6 +18,15 @@ const probePatterns = [
 ];
 const isProbe = (p) => probePatterns.some(re => re.test(p || ""));
 
+// 只对真实内容页做访问记录 + 注入追踪（白名单，与数据清理口径一致）
+// 单段探测路径（/config.json、/graphql、/login、/appsettings.* 等）黑名单匹配不到，
+// 统一在此拦截不记录，从源头防止统计污染复发；新增页面需同步加入。
+const LOGGABLE = new Set([
+  "/", "/page-1", "/page-2", "/page-3", "/page-4", "/page-5", "/page-6", "/page-7", "/page-8",
+  "/rongping-road-19-green-energy-proposal",
+]);
+const isLoggable = (p) => LOGGABLE.has(p);
+
 export async function onRequest(context) {
   const { request, env, waitUntil } = context;
   const url = new URL(request.url);
@@ -42,6 +51,10 @@ export async function onRequest(context) {
   // 恶意/探测路径：返回 404 且不记录
   if (isProbe(url.pathname)) {
     return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  }
+  // 白名单：只对真实内容页做访问记录与追踪注入，其余未知路径一律不入日志
+  if (!isLoggable(url.pathname)) {
+    return context.next();
   }
 
   // 读取CF原生全部访客信息
