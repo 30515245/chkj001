@@ -254,10 +254,12 @@ curl "https://chkj001.20302060.xyz/api/log-list?token=Abc123456Log2026"
    - 页面切到后台（`visibilitychange` → `hidden`）：结算并上报当前值。
    - 页面回到前台（`visibilitychange` → `visible`）：重置 `s = Date.now()`，避免把「离开的时间」算进停留。
    - 关闭/卸载（`pagehide` / `beforeunload`）：结算并上报最后一次。
-   - **15s 心跳**（`setInterval`）：页面停留期间每 15 秒结算并上报一次。即使访客长期不操作、最后被移动端回收，部分停留时长也已在心跳中上报，缓解卸载时末段丢失。
+   - **15s 心跳**（`setInterval`）：页面停留期间每 15 秒结算并上报一次，避免访客长期不操作、最后被移动端直接回收时整段时长丢失。
 3. 上报内容：`{ vid, duration }`，`duration` 为**当前有效停留秒数**（单调递增）；重复上报会不断回写为更大值，服务端最终保留最大值，即实际停留时长。
 4. 上报通道（三级兜底）：优先 `navigator.sendBeacon('/api/duration', j)`（传纯字符串）、失败降级 `fetch(..., { keepalive: true })`、再失败降级普通 `fetch`。sendBeacon 会把请求交给浏览器网络层、在移动端卸载/切后台时最可靠。
 5. 服务端 `/api/duration`：读取请求体（**不依赖 Content-Type**，sendBeacon 的 `text/plain` 与 fetch 的 `application/json` 均可解析）后按 JSON 解析，用 `INSERT ... ON CONFLICT(visit_id) DO UPDATE SET duration = excluded.duration` 回写。UPSERT 同时消除中间件 `waitUntil` 异步 INSERT 与回写之间的竞态。
+
+> **实际口径提醒（移动端）**：桌面端关闭/跳转时 `pagehide`/`beforeunload` 基本可靠，停留几秒也能上报；但**移动端**（iOS Safari/微信/钉钉 WebView）这两个卸载事件经常不触发或被回收打断，因此移动端实际最早的可靠上报点是 **15s 心跳**——**停留不足 15 秒的移动端访问通常不会上报、`duration` 保持 0**（会被「仅有效访问」过滤、不计入平均停留）。这是当前实现的固有下限，若业务需要更低门槛，可把 `setInterval` 心跳间隔调短。
 6. 前提：`visit_record.visit_id` 需建唯一索引（见 `schema.sql`）。**已部署的线上库须单独执行一次**：
    ```
    npx wrangler d1 execute chzckj_visit_log --remote --command="CREATE UNIQUE INDEX IF NOT EXISTS idx_visit_record_visit_id ON visit_record(visit_id);"
