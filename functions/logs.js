@@ -194,7 +194,7 @@ function tableHtml(rows) {
     <div id="cross" class="panel" hidden></div>
     <div class="bar">
       <input id="f" type="search" placeholder="按路径筛选，如 page-3 / /">
-      <label><input id="bot" type="checkbox"> 隐藏机器人</label>
+      <label><input id="bot" type="checkbox" checked> 隐藏机器人</label>
       <label><input id="valid" type="checkbox"> 仅有效访问</label>
       <button id="csv" type="button">导出 CSV</button>
       <span class="cnt" id="cnt"></span>
@@ -237,17 +237,30 @@ function tableHtml(rows) {
     statsEl.innerHTML='<div class="stats">'+tile('总访问',total)+tile('独立访客',uv)+tile('新客',newUv)+tile('回访',Math.max(0,uv-newUv))+tile('平均停留',fmtDur(avg))+'</div><div class="sides">'+side('热门页面',by('visit_path'))+side('热门渠道',by('source'))+'</div>';
   }
 
-  function applyFilter(){
+  function filtered(){
     const q=(fEl.value||'').trim().toLowerCase();
     const hideBot=botEl.checked, onlyValid=validEl.checked;
+    const out=[];
+    DATA.forEach(r=>{
+      if(q && !(r.visit_path||'').toLowerCase().includes(q)) return;
+      if(hideBot && (r.is_bot===1 || r.is_bot==='1')) return;
+      if(onlyValid && !((parseInt(r.duration,10)||0)>0)) return;
+      out.push(r);
+    });
+    return out;
+  }
+
+  function applyFilter(){
+    const rows=filtered();
+    renderStats(rows);
+    renderTrend(rows);
+    renderCross(rows);
+    const inRows=new Set(rows);
     let shown=0;
     DATA.forEach((r,i)=>{
       const tr=tbody.children[i];
       if(!tr) return;
-      const hitPath=!q || (r.visit_path||'').toLowerCase().includes(q);
-      const hitBot=!hideBot || r.is_bot!==1;
-      const hitValid=!onlyValid || (parseInt(r.duration,10)||0)>0;
-      const hit=hitPath && hitBot && hitValid;
+      const hit=inRows.has(r);
       tr.style.display=hit?'':'none';
       if(hit) shown++;
     });
@@ -306,9 +319,6 @@ function tableHtml(rows) {
     el.innerHTML=html; el.hidden=false;
   }
 
-  renderStats(DATA);
-  renderTrend(DATA);
-  renderCross(DATA);
   applyFilter();
   fEl.addEventListener('input',applyFilter);
   botEl.addEventListener('change',applyFilter);

@@ -1,4 +1,23 @@
 /** @type {import("@cloudflare/pages-plugin-types").PagesFunction} */
+
+// 恶意/探测/扫描路径：命中则返回 404 且不入访问日志（避免安全暴露与统计污染）
+const probePatterns = [
+  /^\/robots\.txt$/i,
+  /^\/sitemap(\.xml|_index\.xml|\.xml\.gz|\.gz)?$/i,
+  /(^|\/)(\.git|\.svn|\.hg|\.env|\.npmrc|\.htaccess|\.gitlab-ci|\.netrc|\.env\.)/i,
+  /(^|\/)(server\.(key|pem|p12|jks|crt)|id_rsa|dump\.sql|database\.sql|backup)(\/|$)/i,
+  /\.(sql|bak|old|swp|save|backup|log|gz|tar|zip)(\/|$)/i,
+  /(^|\/)(user_secrets|secret(s|s\.json|s\.yaml)?|credentials|access|phpinfo|config\.php|wp-config\.php|phpunit|artisan|laravel\.log)(\/|$)/i,
+  /(^|\/)(composer\.(json|lock)|package\.json|yarn\.lock|Dockerfile|docker-compose)(\/|$)/i,
+  /(^|\/)(web\.config|crossdomain\.xml|boot\.ini|etc\/passwd|proc\/|winnt\/|cgi-bin)(\/|$)/i,
+  /(^|\/)(wp-admin|wp-includes|wp-content|wp-login)/i,
+  /(^|\/)(actuator|storage|vendor|officialsite)/i,
+  /(^|\/)alvin9999\//i,
+  /\.php(\/|$|\.)/i,
+  /^(?:\/[^/]+){2,}$/, // 三段及以上深路径（本站页面均为 ≤2 段，防扫描噪流）
+];
+const isProbe = (p) => probePatterns.some(re => re.test(p || ""));
+
 export async function onRequest(context) {
   const { request, env, waitUntil } = context;
   const url = new URL(request.url);
@@ -19,6 +38,10 @@ export async function onRequest(context) {
   // 后台查看页 /logs 及其登录/退出，属于运营动作，不入访问统计
   if (url.pathname === "/logs") {
     return context.next();
+  }
+  // 恶意/探测路径：返回 404 且不记录
+  if (isProbe(url.pathname)) {
+    return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
   }
 
   // 读取CF原生全部访客信息
@@ -129,7 +152,7 @@ export async function onRequest(context) {
   // 机器人/预览爬虫标记：明确爬虫直接标记（微信/钉钉预览与真实打开 UA 相同，无法区分，故不在此列）
   const isBot = (ua) => {
     ua = (ua || "").toLowerCase();
-    return /slackbot|telegrambot|discordbot|facebookexternalhit|whatsapp|bytespider|spider|bot|crawl|python-requests|curl|go-http|preview/.test(ua);
+    return /slackbot|telegrambot|discordbot|facebookexternalhit|whatsapp|bytespider|spider|bot|crawl|python-requests|curl|go-http|preview|nmap|masscan|zgrab|sqlmap|nikto|wpscan|acunetix|nessus|semrush|ahrefs|mj12|petalbot|sogou|yandexbot|baiduspider|360spider|twitterbot|linkedinbot|httpclient|okhttp|lighthouse|headlesschrome|phantomjs|screamingfrog|scrapy|nutch|archive-org_bot|node-fetch|axios|netcraft|builtwith|wappalyzer|zoominfo|dotbot|java\/|libwww|wget/.test(ua);
   };
 
   const uaRaw = headers.get("User-Agent") || "";
