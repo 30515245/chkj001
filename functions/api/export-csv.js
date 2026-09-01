@@ -1,8 +1,6 @@
-const SECRET = "Abc123456Log2026";
-
-function isAuthed(request) {
+function isAuthed(request, secret) {
   const cookie = request.headers.get("cookie") || "";
-  return cookie.split(";").some(c => c.trim() === `auth=${SECRET}`);
+  return cookie.split(";").some(c => c.trim() === `auth=${secret}`);
 }
 
 function csvCell(v) {
@@ -11,8 +9,9 @@ function csvCell(v) {
 }
 
 export async function onRequest({ request, env }) {
+  const SECRET = env.LOG_SECRET || "Abc123456Log2026";
   // 复用 /logs 的登录态（HttpOnly cookie），未登录拒绝
-  if (!isAuthed(request)) {
+  if (!isAuthed(request, SECRET)) {
     return new Response("未授权", { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 

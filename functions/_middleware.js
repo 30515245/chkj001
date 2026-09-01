@@ -152,18 +152,28 @@ export async function onRequest(context) {
   // epoch 秒时间戳，便于按日期区间筛选与正确排序（字符串 visit_time 仅用于展示）
   const ts = Math.floor(Date.now() / 1000);
 
+  // 独立访客识别：稳定的第一方 cookie（uv）跨页/跨会话复用，首次访问才生成
+  // 比按 visitor_ip 去重更准确（移动网络/公司 NAT 不再把多人误并或误分）
+  const cookieRaw = headers.get("cookie") || "";
+  const uvMatch = cookieRaw.match(/(?:^|;\s*)uv=([^;]+)/);
+  const uvId = uvMatch ? uvMatch[1] : crypto.randomUUID();
+
   // 异步写入数据库，waitUntil不会阻塞页面响应速度
   const saveLog = async () => {
     try {
+      // 是否新客：该 uv 是否已在库中出现过（首次访问 is_new=1，便于新客/回访口径）
+      const found = await env.DB.prepare("SELECT COUNT(*) AS c FROM visit_record WHERE uv_id = ?").bind(uvId).first();
+      const isNew = (found && Number(found.c) > 0) ? 0 : 1;
       await env.DB.prepare(`
       INSERT INTO visit_record
-      (visit_url, visit_path, visitor_ip, user_agent, country, region, city, timezone, referer, visit_time, visit_id, ts, client, source, is_bot, duration)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+      (visit_url, visit_path, visitor_ip, user_agent, country, region, city, timezone, referer, visit_time, visit_id, ts, client, source, is_bot, duration, uv_id, is_new)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
       ON CONFLICT(visit_id) DO UPDATE SET
         visit_url=excluded.visit_url, visit_path=excluded.visit_path, visitor_ip=excluded.visitor_ip,
         user_agent=excluded.user_agent, country=excluded.country, region=excluded.region, city=excluded.city,
         timezone=excluded.timezone, referer=excluded.referer, visit_time=excluded.visit_time,
-        ts=excluded.ts, client=excluded.client, source=excluded.source, is_bot=excluded.is_bot
+        ts=excluded.ts, client=excluded.client, source=excluded.source, is_bot=excluded.is_bot,
+        uv_id=excluded.uv_id, is_new=excluded.is_new
       `)
         .bind(
           logData.visit_url,
@@ -180,7 +190,9 @@ export async function onRequest(context) {
           ts,
           logData.client,
           logData.source,
-          logData.is_bot
+          logData.is_bot,
+          uvId,
+          isNew
         )
         .run();
     } catch (err) {
@@ -201,7 +213,9 @@ export async function onRequest(context) {
       h.set("content-type", ct);
       // 关闭页面缓存，确保每次打开都经过中间件并记录（否则边缘缓存会让重复访问漏记）
       h.set("Cache-Control", "no-store");
-      h.set("Set-Cookie", `pv=${visitId}; Path=/; SameSite=Lax; Max-Age=3600`);
+      h.delete("Set-Cookie");
+      h.append("Set-Cookie", `pv=${visitId}; Path=/; SameSite=Lax; Max-Age=3600`);
+      h.append("Set-Cookie", `uv=${uvId}; Path=/; SameSite=Lax; Max-Age=31536000`);
       return new Response(out, { status: resp.status, headers: h });
     }
   }

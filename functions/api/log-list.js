@@ -1,6 +1,6 @@
 export async function onRequest({ request, env }) {
   try {
-    const SECRET_KEY = "Abc123456Log2026";
+    const SECRET_KEY = env.LOG_SECRET || "Abc123456Log2026";
     const urlObj = new URL(request.url);
     const authToken = urlObj.searchParams.get("token");
 
