@@ -93,6 +93,8 @@ export async function onRequest(context) {
     if (/Windows/i.test(ua)) return "Windows";
     if (/Mac OS|Macintosh/i.test(ua)) return "Mac";
     if (/Linux/i.test(ua)) return "Linux";
+    // 移动端通用兜底：无 OS 特征词但标了 Mobile 的 WebView，不误判成桌面浏览器
+    if (/Mobile|Mobi/i.test(ua)) return "移动端";
     if (/Chrome/i.test(ua)) return "Chrome";
     if (/Firefox/i.test(ua)) return "Firefox";
     if (/Edg/i.test(ua)) return "Edge";
