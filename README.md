@@ -177,6 +177,7 @@ POST /api/duration  { vid, duration }  →  UPDATE visit_record SET duration=? W
 | 路径以 `/api/` 开头 | 停留时长上报等接口本身不是页面访问 |
 | 路径为 `/logs` | 运营者后台查看/登录/退出页，属运营动作，不入访问统计 |
 | 命中恶意/探测路径 | `/.git`、`/.env`、`/robots.txt`、`/sitemap.xml`、`/wp-admin*`、`/server.key`、`/dump.sql`、`.php/.sql/.bak` 及 3 段以上深路径等 → 直接返回 `404` 且不记录（防暴露与统计污染） |
+| **非白名单路径** | 只对**真实内容页**做访问记录与追踪注入：`/`、`/page-1…8`、`/rongping-road-19-green-energy-proposal`。其余未知路径（含 `/config.json`、`/graphql`、`/login` 等黑名单匹配不到的单段探测靶标）一律**放行但不记录**。**新增页面需同步加入 `_middleware.js` 的 `LOGGABLE` 白名单** |
 | 路径以 `.html` 结尾 | Cloudflare Pages 会把 `/xxx.html` 永久 **308 重定向**到 `/xxx`；若此处也记录，重定向前后会产生两条重复日志。故跳过 `.html`，由重定向后的干净 URL 统一记录一次 |
 
 > 因此站点内导航虽使用 `page-1.html` 这类链接，实际被记录的是去 `.html` 后的干净路径（如 `/page-1`）。
@@ -223,7 +224,7 @@ POST /api/duration  { vid, duration }  →  UPDATE visit_record SET duration=? W
 
 - **登录**：提交密钥 → 服务端下发 `HttpOnly` Cookie `auth=<密钥>`（`Max-Age=86400`，24 小时）。
 - **退出**：访问 `/logs?logout=1` 清除 Cookie 并跳回登录页。
-- **概览卡片**：总访问、独立访客（按 `uv` 访客 Cookie 去重，比按 IP 更准）、新客（首次到访）、回访、平均停留（仅统计有停留的访问）。
+- **概览卡片**：总访问、独立访客（按 `uv` 访客 Cookie 去重，比按 IP 更准）、新客（首次到访）、回访、平均停留（仅统计有停留的访问）。**这些卡片由服务端跨全库聚合，是真实总数**，不受明细表 `LIMIT 1000` 影响；热门页面/渠道 Top 随当前筛选实时联动。
 - **趋势图**：近 14 天访问趋势。
 - **渠道×落地页交叉分析**：各渠道 Top 落地页的访问数 / 平均停留，可看出「哪个渠道真正读进去了、读了哪几页」。
 - **热门榜单**：热门页面 Top5、热门渠道 Top5。
