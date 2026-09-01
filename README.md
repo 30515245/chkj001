@@ -207,7 +207,8 @@ POST /api/duration  { vid, duration }  →  UPDATE visit_record SET duration=? W
 
 **派生字段的解析逻辑**（均在 `_middleware.js` 内）：
 
-- `client`：优先识别 IM 容器（微信 / 钉钉 / 企业微信 / QQ / 微博），其次按设备/浏览器（iOS / Android / Windows / Mac / Linux / Chrome / Firefox / Edge / Safari），都不匹配则记「其他」。定向传播场景下 UA 全文太长且无用，只用「用什么打开」的短标签。
+- `client`：优先识别 IM 容器（微信 / 钉钉 / 企业微信 / QQ / 微博），其次按设备系统（**鸿蒙** OpenHarmony/ArkWeb → iOS → Android → Windows → Mac → Linux），再按「移动端通用兜底」（UA 带 `Mobile`/`Mobi` 但无系统特征词 → 标「移动端」），然后才轮到桌面浏览器名（Chrome / Firefox / Edge / Safari），都不匹配则记「其他」。定向传播场景下 UA 全文太长且无用，只用「用什么打开」的短标签。
+  > 补充（鸿蒙识别）：华为鸿蒙(OpenHarmony)内嵌浏览器(ArkWeb)的 UA 只写 `OpenHarmony`、不含 `Android/iOS`，需在 Chrome 之前单独识别；2026-09-01 前按旧逻辑会把这些鸿蒙访问误归为「Chrome」。如需统一历史口径，可执行 `UPDATE visit_record SET client='鸿蒙' WHERE client='Chrome' AND user_agent LIKE '%OpenHarmony%'`。
 - `source`：有 `utm_source` 参数时取其值；否则按 UA 识别微信/钉钉/企业微信；再否则看 referer 域名（微信/QQ/钉钉/邮件/其他域名）；都没有则记「直接访问」。
 - `is_bot`：UA 匹配 `slackbot|telegrambot|discordbot|facebookexternalhit|whatsapp|bytespider|spider|bot|crawl|python-requests|curl|go-http|preview` 等规则时标记。
   > ⚠️ 微信/钉钉的**链接预览**与真实打开共用同一 UA，无法区分，故预览不会被判为 bot，其停留时长也恒为 0（未真正打开页面）。
@@ -300,8 +301,10 @@ curl "https://chkj001.20302060.xyz/api/log-list?token=Abc123456Log2026"
 
 - 停留时长依赖浏览器在卸载前成功触发 `visibilitychange`/`pagehide` 并发送 `sendBeacon`/`fetch`。部分移动端浏览器在激进后台回收时仍可能丢失末段；为缓解这一情况已内置 **15s 心跳**定时上报，即使最后被回收，停留前期时长也大概率已落库（末段少量偏差属预期）。
 - 微信/钉钉的链接预览与真实打开 UA 相同、且预览不会触发停留上报，所以预览访问的 `duration` 恒为 0、且无法与普通访问区分。
+- **iPadOS 13+ 的 iPad 会伪装成 Mac**：其 Safari UA 写成 `Macintosh` 且不含 `iPad` 关键词，会被 `client` 判断为「Mac」。苹果出于隐私如此设计，纯靠 UA 无法可靠区分桌面 Mac 与 iPad；如确需区分，只能借助前端 JS 的 `navigator.maxTouchPoints`（≥1 判定触屏/iPad）增强，属后续可选方案。
 - `/api/log-list` 按 `visit_time`（字符串）排序，`/logs` 与 `/api/export-csv` 按 `ts`（数值）排序，二者顺序可能略有差异（同一秒内）。
 - Cloudflare Pages 会把 `/page-1.html` 以 **308** 重定向到 `/page-1`；该重定向为永久性，浏览器会缓存，仅首次点击多一次跳转开销。保留 `.html` 后缀是为了让本地双击预览仍可用。
+- 页面布局：`/logs` 采用「整页 `overflow-y:auto` + 明细表区 `max-height` 内部滚动」，桌面与移动端均稳定出现滚动条；移动端统计卡 3 列、明细表窄屏横向滚动（2026-09-01 曾因统计卡从 3 张增至 5 张后移动端单列堆叠、导致无滚动条，已修复）。
 
 ## 安全提醒
 
