@@ -248,17 +248,23 @@ curl "https://chkj001.20302060.xyz/api/log-list?token=Abc123456Log2026"
 
 停留时长是**回写**的，不在首次访问时记录（首次 `duration` 默认 0）：
 
-1. 中间件注入的追踪脚本读取 `pv` Cookie 拿到 `vid`，记录开始时间 `s = Date.now()`，`sent = 0`。
+1. 中间件注入的追踪脚本读取 `pv` Cookie 拿到 `vid`，记录开始时间 `s = Date.now()`、已上报到的秒数 `max = 0`。
 2. 计时逻辑：
-   - 页面切到后台（`visibilitychange` → `hidden`）：把自上一次计时点起的秒数累加到 `sent`，并上报。
+   - 逐秒结算：`d = 当前距 s 的秒数`，若 `d > max` 则更新 `max = d` 并上报 `{ vid, duration: d }`（单调递增、越算越准）。
+   - 页面切到后台（`visibilitychange` → `hidden`）：结算并上报当前值。
    - 页面回到前台（`visibilitychange` → `visible`）：重置 `s = Date.now()`，避免把「离开的时间」算进停留。
-   - 关闭/卸载（`pagehide`）：上报最后一段并标记 `done`。
-3. 上报内容：`{ vid, duration: sent }`，即**累计有效停留秒数**。
-4. 上报通道：优先 `navigator.sendBeacon`（卸载时仍可发送），失败则降级到 `fetch(..., { keepalive: true })`。
-5. 服务端 `/api/duration`：读取请求体（**不依赖 Content-Type**，sendBeacon 的 `text/plain` 与 fetch 的 `application/json` 均可解析）后按 JSON 解析，以 `visit_id = vid` 定位记录，用 `INSERT ... ON CONFLICT(visit_id) DO UPDATE SET duration = excluded.duration` 回写。由于每次上报都携带累计总值，最终落库的是完整停留秒数；UPSERT 同时消除中间件 `waitUntil` 异步 INSERT 与回写之间的竞态。
-6. 前提：`visit_record.visit_id` 需建唯一索引（见 `schema.sql`）。**已部署的线上库须单独执行一次**：`npx wrangler d1 execute chzckj_visit_log --remote --command="CREATE UNIQUE INDEX IF NOT EXISTS idx_visit_record_visit_id ON visit_record(visit_id);"`
+   - 关闭/卸载（`pagehide` / `beforeunload`）：结算并上报最后一次。
+   - **15s 心跳**（`setInterval`）：页面停留期间每 15 秒结算并上报一次。即使访客长期不操作、最后被移动端回收，部分停留时长也已在心跳中上报，缓解卸载时末段丢失。
+3. 上报内容：`{ vid, duration }`，`duration` 为**当前有效停留秒数**（单调递增）；重复上报会不断回写为更大值，服务端最终保留最大值，即实际停留时长。
+4. 上报通道（三级兜底）：优先 `navigator.sendBeacon('/api/duration', j)`（传纯字符串）、失败降级 `fetch(..., { keepalive: true })`、再失败降级普通 `fetch`。sendBeacon 会把请求交给浏览器网络层、在移动端卸载/切后台时最可靠。
+5. 服务端 `/api/duration`：读取请求体（**不依赖 Content-Type**，sendBeacon 的 `text/plain` 与 fetch 的 `application/json` 均可解析）后按 JSON 解析，用 `INSERT ... ON CONFLICT(visit_id) DO UPDATE SET duration = excluded.duration` 回写。UPSERT 同时消除中间件 `waitUntil` 异步 INSERT 与回写之间的竞态。
+6. 前提：`visit_record.visit_id` 需建唯一索引（见 `schema.sql`）。**已部署的线上库须单独执行一次**：
+   ```
+   npx wrangler d1 execute chzckj_visit_log --remote --command="CREATE UNIQUE INDEX IF NOT EXISTS idx_visit_record_visit_id ON visit_record(visit_id);"
+   ```
+   > ⚠️ 若线上库未建该索引，UPSERT 的 `ON CONFLICT` 会因缺少唯一约束而抛错，所有时长上报都会 500、停留时长恒为 0。
 
-> 该修复（`de06347`）解决了此前追踪脚本因缺少闭合花括号导致整段不执行、停留时长恒为 0 的问题。
+> 该机制历经多次修复才让移动端停留时长可靠回写：`de06347` 补闭合花括号（原先整段不执行）、`1fb81e1` 倒换上报道优先级、`3382397` 改 sendBeacon 纯字符串 + 15s 心跳 + 服务端支持 `text/plain`、`5bc5043`/PR#1 用 UPSERT + 唯一索引消除写库竞态。
 
 ### 7.6 筛选与统计口径
 
@@ -280,7 +286,7 @@ curl "https://chkj001.20302060.xyz/api/log-list?token=Abc123456Log2026"
 
 ### 7.8 已知事项与局限
 
-- 停留时长依赖浏览器在卸载前成功触发 `visibilitychange`/`pagehide` 并发送 `sendBeacon`/`fetch`。部分移动端浏览器在激进后台回收时可能丢弃最后一段，导致停留偏短。
+- 停留时长依赖浏览器在卸载前成功触发 `visibilitychange`/`pagehide` 并发送 `sendBeacon`/`fetch`。部分移动端浏览器在激进后台回收时仍可能丢失末段；为缓解这一情况已内置 **15s 心跳**定时上报，即使最后被回收，停留前期时长也大概率已落库（末段少量偏差属预期）。
 - 微信/钉钉的链接预览与真实打开 UA 相同、且预览不会触发停留上报，所以预览访问的 `duration` 恒为 0、且无法与普通访问区分。
 - `/api/log-list` 按 `visit_time`（字符串）排序，`/logs` 与 `/api/export-csv` 按 `ts`（数值）排序，二者顺序可能略有差异（同一秒内）。
 - Cloudflare Pages 会把 `/page-1.html` 以 **308** 重定向到 `/page-1`；该重定向为永久性，浏览器会缓存，仅首次点击多一次跳转开销。保留 `.html` 后缀是为了让本地双击预览仍可用。
