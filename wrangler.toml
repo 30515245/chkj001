@@ -1,0 +1,16 @@
+name = "chzckj"
+pages_build_output_dir = "."
+compatibility_date = "2024-09-23"
+
+# === 访问日志 D1 数据库（与 sns 项目同构的日志设计方案） ===
+# 首次部署前，请在本项目目录执行以下命令创建独立数据库并建表：
+#   1) npx wrangler d1 create chzckj_visit_log
+#      —— 命令会返回 database_id（UUID），请把下方 database_id 替换成它
+#   2) npx wrangler d1 execute chzckj_visit_log --local  --file=./schema.sql
+#   3) npx wrangler d1 execute chzckj_visit_log --remote --file=./schema.sql
+# 提示：若希望与 sns 共用同一张表（零额外创建），可把下方
+#   database_name / database_id 直接改成 sns 的 visit_log_db / a8ccb836-66e0-41f8-ae84-43a7c93a50cd
+[[d1_databases]]
+binding = "DB"
+database_name = "chzckj_visit_log"
+database_id = "164d1194-5529-41f8-8ec9-f496f4766d8c"

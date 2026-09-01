@@ -1,0 +1,15 @@
+# Wrangler 本地构建 / 部署缓存
+.wrangler/
+
+# 部署打包产物（每次部署时生成，不入库；旧快照已归档至 ../_archive/）
+rongping-proposal.zip
+
+# zip 解压残留的重复副本（与根目录文件一致，456KB；旧快照已归档至 ../_archive/）
+rongping-proposal/
+
+# 依赖
+node_modules/
+
+# 系统文件
+.DS_Store
+Thumbs.db
