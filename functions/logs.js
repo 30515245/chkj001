@@ -109,7 +109,7 @@ function tableHtml(rows) {
     id: r.id, visit_time: r.visit_time, duration: r.duration, visit_path: r.visit_path,
     source: r.source, region: r.region, city: r.city, client: r.client,
     referer: r.referer, is_bot: r.is_bot || 0,
-    uv_id: r.uv_id || "", visitor_ip: r.visitor_ip || "", is_new: r.is_new || 0
+    uv_id: r.uv_id || "", uv_key: r.uv_id || r.visitor_ip || "", is_new: r.is_new || 0
   })));
   return `<!doctype html>
 <html lang="zh">
@@ -222,7 +222,7 @@ function tableHtml(rows) {
 
   function renderStats(rows){
     const total=rows.length;
-    const uv=new Set(rows.map(r=>r.uv_id||r.visitor_ip||'')).size;
+    const uv=new Set(rows.map(r=>r.uv_key||'')).size;
     const newUv=new Set(rows.filter(r=>r.uv_id && Number(r.is_new)===1).map(r=>r.uv_id)).size;
     const durs=rows.map(r=>parseInt(r.duration,10)||0).filter(d=>d>0);
     const avg=durs.length?Math.round(durs.reduce((a,b)=>a+b,0)/durs.length):0;
