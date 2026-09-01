@@ -10,16 +10,19 @@ export async function onRequest(context) {
   let vid = "";
   let duration = 0;
   try {
-    const ct = request.headers.get("content-type") || "";
+    const ct = (request.headers.get("content-type") || "").toLowerCase();
+    let body;
     if (ct.includes("application/json")) {
-      const body = await request.json();
-      vid = body.vid || "";
-      duration = parseInt(body.duration, 10) || 0;
+      body = await request.json();
+    } else if (ct.includes("text/plain")) {
+      // sendBeacon 传字符串时 content-type 为 text/plain，直接按原始 JSON 文本解析
+      body = JSON.parse(await request.text());
     } else {
       const fd = await request.formData();
-      vid = fd.get("vid") || "";
-      duration = parseInt(fd.get("duration"), 10) || 0;
+      body = { vid: fd.get("vid"), duration: fd.get("duration") };
     }
+    vid = body.vid || "";
+    duration = parseInt(body.duration, 10) || 0;
   } catch (e) {
     return new Response(JSON.stringify({ code: 400, msg: "bad request" }), {
       status: 400,
