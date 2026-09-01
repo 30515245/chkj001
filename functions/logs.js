@@ -175,7 +175,15 @@ function tableHtml(rows) {
   .cli,.src{color:var(--txt)}
   .ref{color:var(--mut)}
   .empty{color:var(--mut);padding:30px;text-align:center}
-  @media (max-width:640px){.stats{grid-template-columns:1fr}.sides{grid-template-columns:1fr}}
+  /* 移动端：整页允许滚动，统计卡改 3 列避免把表格区挤没，表格区固定上限并内部滚动 */
+  @media (max-width:640px){
+    body{height:auto;overflow-y:auto}
+    .wrap{height:auto}
+    .stats{grid-template-columns:repeat(3,1fr)}
+    .sides{grid-template-columns:1fr}
+    .box{flex:none;max-height:58vh;min-height:120px;overflow:auto}
+    .box table{min-width:760px}
+  }
 </style>
 </head>
 <body>
