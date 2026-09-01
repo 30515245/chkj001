@@ -123,8 +123,8 @@ function tableHtml(rows) {
   html,body{height:100%}
   body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
     background:radial-gradient(1200px 600px at 50% -10%,#14312688,transparent),var(--bg);
-    color:var(--txt);height:100vh;padding:18px 14px;display:flex;flex-direction:column;overflow:hidden}
-  .wrap{max-width:1180px;margin:0 auto;width:100%;display:flex;flex-direction:column;height:100%}
+    color:var(--txt);min-height:100vh;padding:18px 14px;display:flex;flex-direction:column;overflow-y:auto}
+  .wrap{max-width:1180px;margin:0 auto;width:100%;display:flex;flex-direction:column}
   header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;flex:none}
   h1{font-size:19px;letter-spacing:.5px}
   .meta{color:var(--mut);font-size:13px}
@@ -161,7 +161,7 @@ function tableHtml(rows) {
   .bar button{margin:0;width:auto;padding:8px 16px;border:none;border-radius:10px;cursor:pointer;
     background:linear-gradient(135deg,#34d399,#10b981);color:#04140d;font-weight:700;font-size:13px}
   .bar .cnt{color:var(--mut);font-size:13px;margin-left:auto}
-  .box{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:auto;box-shadow:0 20px 60px #0008;flex:1;min-height:0}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:auto;box-shadow:0 20px 60px #0008;flex:none;min-height:140px;max-height:72vh}
   table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:13px}
   col:nth-child(1){width:5%}col:nth-child(2){width:15%}col:nth-child(3){width:8%}
   col:nth-child(4){width:13%}col:nth-child(5){width:10%}col:nth-child(6){width:9%}
@@ -175,13 +175,10 @@ function tableHtml(rows) {
   .cli,.src{color:var(--txt)}
   .ref{color:var(--mut)}
   .empty{color:var(--mut);padding:30px;text-align:center}
-  /* 移动端：整页允许滚动，统计卡改 3 列避免把表格区挤没，表格区固定上限并内部滚动 */
+  /* 移动端：统计卡 3 列,明细表在窄屏下横向滚动 */
   @media (max-width:640px){
-    body{height:auto;overflow-y:auto}
-    .wrap{height:auto}
     .stats{grid-template-columns:repeat(3,1fr)}
     .sides{grid-template-columns:1fr}
-    .box{flex:none;max-height:58vh;min-height:120px;overflow:auto}
     .box table{min-width:760px}
   }
 </style>
