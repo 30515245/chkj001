@@ -255,7 +255,8 @@ curl "https://chkj001.20302060.xyz/api/log-list?token=Abc123456Log2026"
    - 关闭/卸载（`pagehide`）：上报最后一段并标记 `done`。
 3. 上报内容：`{ vid, duration: sent }`，即**累计有效停留秒数**。
 4. 上报通道：优先 `navigator.sendBeacon`（卸载时仍可发送），失败则降级到 `fetch(..., { keepalive: true })`。
-5. 服务端 `/api/duration`：以 `visit_id = vid` 定位记录，`UPDATE visit_record SET duration = ?`。由于每次上报都携带累计总值，最终落库的是完整停留秒数。
+5. 服务端 `/api/duration`：读取请求体（**不依赖 Content-Type**，sendBeacon 的 `text/plain` 与 fetch 的 `application/json` 均可解析）后按 JSON 解析，以 `visit_id = vid` 定位记录，用 `INSERT ... ON CONFLICT(visit_id) DO UPDATE SET duration = excluded.duration` 回写。由于每次上报都携带累计总值，最终落库的是完整停留秒数；UPSERT 同时消除中间件 `waitUntil` 异步 INSERT 与回写之间的竞态。
+6. 前提：`visit_record.visit_id` 需建唯一索引（见 `schema.sql`）。**已部署的线上库须单独执行一次**：`npx wrangler d1 execute chzckj_visit_log --remote --command="CREATE UNIQUE INDEX IF NOT EXISTS idx_visit_record_visit_id ON visit_record(visit_id);"`
 
 > 该修复（`de06347`）解决了此前追踪脚本因缺少闭合花括号导致整段不执行、停留时长恒为 0 的问题。
 

@@ -157,8 +157,13 @@ export async function onRequest(context) {
     try {
       await env.DB.prepare(`
       INSERT INTO visit_record
-      (visit_url, visit_path, visitor_ip, user_agent, country, region, city, timezone, referer, visit_time, visit_id, ts, client, source, is_bot)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (visit_url, visit_path, visitor_ip, user_agent, country, region, city, timezone, referer, visit_time, visit_id, ts, client, source, is_bot, duration)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+      ON CONFLICT(visit_id) DO UPDATE SET
+        visit_url=excluded.visit_url, visit_path=excluded.visit_path, visitor_ip=excluded.visitor_ip,
+        user_agent=excluded.user_agent, country=excluded.country, region=excluded.region, city=excluded.city,
+        timezone=excluded.timezone, referer=excluded.referer, visit_time=excluded.visit_time,
+        ts=excluded.ts, client=excluded.client, source=excluded.source, is_bot=excluded.is_bot
       `)
         .bind(
           logData.visit_url,
