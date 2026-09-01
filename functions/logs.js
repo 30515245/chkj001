@@ -1,5 +1,3 @@
-const SECRET = "Abc123456Log2026";
-
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
@@ -13,9 +11,9 @@ function fmtDur(s) {
   return m > 0 ? `${m}分${sec}秒` : `${sec}秒`;
 }
 
-function isAuthed(request) {
+function isAuthed(request, secret) {
   const cookie = request.headers.get("cookie") || "";
-  return cookie.split(";").some(c => c.trim() === `auth=${SECRET}`);
+  return cookie.split(";").some(c => c.trim() === `auth=${secret}`);
 }
 
 function loginHtml(error) {
@@ -110,7 +108,8 @@ function tableHtml(rows) {
   const dataJson = JSON.stringify(rows.map(r => ({
     id: r.id, visit_time: r.visit_time, duration: r.duration, visit_path: r.visit_path,
     source: r.source, region: r.region, city: r.city, client: r.client,
-    referer: r.referer, is_bot: r.is_bot || 0
+    referer: r.referer, is_bot: r.is_bot || 0,
+    uv_id: r.uv_id || "", uv_key: r.uv_id || r.visitor_ip || "", is_new: r.is_new || 0
   })));
   return `<!doctype html>
 <html lang="zh">
@@ -131,7 +130,7 @@ function tableHtml(rows) {
   .meta{color:var(--mut);font-size:13px}
   .meta a{color:var(--green);text-decoration:none;margin-left:14px}
   .meta a:hover{text-decoration:underline}
-  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;flex:none}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px;flex:none}
   .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center}
   .tv{font-size:23px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums}
   .tl{color:var(--mut);font-size:12px;margin-top:3px}
@@ -142,6 +141,19 @@ function tableHtml(rows) {
   .side-row:first-of-type{border-top:none}
   .side-k{color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:78%}
   .side-c{color:var(--green);font-variant-numeric:tabular-nums;flex:none}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:10px;flex:none}
+  .panel-h{color:var(--mut);font-size:12px;margin-bottom:8px}
+  .bars{display:flex;align-items:flex-end;gap:5px;height:88px}
+  .bwrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
+  .bcol{width:100%;background:linear-gradient(180deg,#34d399,#0e9f6e);border-radius:4px 4px 0 0}
+  .bcol:hover{filter:brightness(1.12)}
+  .bval{font-size:11px;color:var(--green);font-variant-numeric:tabular-nums}
+  .blab{font-size:10px;color:var(--mut)}
+  .cross table{width:100%;border-collapse:collapse;font-size:12px}
+  .cross th,.cross td{text-align:left;padding:5px 8px;border-bottom:1px solid #15291f;white-space:nowrap}
+  .cross th{color:var(--mut);font-weight:600}
+  .cross td:first-child{color:var(--green);font-variant-numeric:tabular-nums}
+  .cross td:last-child{color:#fbbf24;font-variant-numeric:tabular-nums}
   .bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;flex:none;margin-bottom:10px}
   .bar input{padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:#0c1813;color:var(--txt);font-size:13px;outline:none;min-width:200px}
   .bar input:focus{border-color:var(--green)}
@@ -173,6 +185,8 @@ function tableHtml(rows) {
       <div class="meta">共 ${rows.length} 条<a href="/logs?logout=1">退出登录</a></div>
     </header>
     <div id="stats"></div>
+    <div id="trend" class="panel" hidden></div>
+    <div id="cross" class="panel" hidden></div>
     <div class="bar">
       <input id="f" type="search" placeholder="按路径筛选，如 page-3 / /">
       <label><input id="bot" type="checkbox"> 隐藏机器人</label>
@@ -208,13 +222,14 @@ function tableHtml(rows) {
 
   function renderStats(rows){
     const total=rows.length;
-    const uniqIp=new Set(rows.map(r=>r.visitor_ip||'')).size;
+    const uv=new Set(rows.map(r=>r.uv_key||'')).size;
+    const newUv=new Set(rows.filter(r=>r.uv_id && Number(r.is_new)===1).map(r=>r.uv_id)).size;
     const durs=rows.map(r=>parseInt(r.duration,10)||0).filter(d=>d>0);
     const avg=durs.length?Math.round(durs.reduce((a,b)=>a+b,0)/durs.length):0;
     const by=k=>{const m={};rows.forEach(r=>{const v=(r[k]||'').trim();if(v)m[v]=(m[v]||0)+1;});return Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,5);};
     const tile=(l,v)=>'<div class="tile"><div class="tv">'+esc(v)+'</div><div class="tl">'+esc(l)+'</div></div>';
     const side=(l,arr)=>arr.length?'<div class="side"><div class="side-h">'+esc(l)+'</div>'+arr.map(([k,c])=>'<div class="side-row"><span class="side-k" title="'+esc(k)+'">'+esc(k)+'</span><span class="side-c">'+c+'</span></div>').join('')+'</div>':'';
-    statsEl.innerHTML='<div class="stats">'+tile('总访问',total)+tile('独立访客',uniqIp)+tile('平均停留',fmtDur(avg))+'</div><div class="sides">'+side('热门页面',by('visit_path'))+side('热门渠道',by('source'))+'</div>';
+    statsEl.innerHTML='<div class="stats">'+tile('总访问',total)+tile('独立访客',uv)+tile('新客',newUv)+tile('回访',Math.max(0,uv-newUv))+tile('平均停留',fmtDur(avg))+'</div><div class="sides">'+side('热门页面',by('visit_path'))+side('热门渠道',by('source'))+'</div>';
   }
 
   function applyFilter(){
@@ -239,7 +254,56 @@ function tableHtml(rows) {
     window.location.href='/api/export-csv?'+p;
   }
 
+  function cnKey(dt){ return new Date(dt.getTime()+8*3600*1000).toISOString().slice(0,10); }
+
+  function renderTrend(rows){
+    const el=document.getElementById('trend');
+    const byDay={};
+    rows.forEach(r=>{ const d=(r.visit_time||'').slice(0,10); if(d) byDay[d]=(byDay[d]||0)+1; });
+    const days=[];
+    for(let i=13;i>=0;i--){ const k=cnKey(new Date(Date.now()-i*86400000)); days.push({k,c:byDay[k]||0}); }
+    const max=Math.max(1,...days.map(d=>d.c));
+    const bars=days.map(d=>{
+      const h=Math.round(d.c/max*100);
+      return '<div class="bwrap" title="'+esc(d.k)+' — '+d.c+' 次">'+
+        (d.c?'<div class="bval">'+d.c+'</div>':'<div class="bval" style="color:transparent">0</div>')+
+        '<div class="bcol" style="height:'+(d.c?h:2)+'%"></div>'+
+        '<div class="blab">'+esc(d.k.slice(8))+'</div></div>';
+    });
+    el.innerHTML='<div class="panel-h">近 14 天访问趋势</div><div class="bars">'+bars.join('')+'</div>';
+    el.hidden=false;
+  }
+
+  function renderCross(rows){
+    const el=document.getElementById('cross');
+    const srcMap={};
+    rows.forEach(r=>{
+      const src=(r.source||'').trim()||'未知';
+      const p=(r.visit_path||'').trim()||'/';
+      srcMap[src]=srcMap[src]||{};
+      const m=srcMap[src][p]||(srcMap[src][p]={c:0,s:0});
+      m.c++; m.s+=parseInt(r.duration,10)||0;
+    });
+    const srcs=Object.entries(srcMap).sort((a,b)=>{
+      const sum=x=>Object.values(x[1]).reduce((y,z)=>y+z.c,0);
+      return sum(b)-sum(a);
+    }).slice(0,5);
+    if(!srcs.length){ el.hidden=true; return; }
+    let html='<div class="panel-h">渠道 × 落地页（访问 / 平均停留）</div><div class="cross"><table><thead><tr><th>渠道</th><th>页面</th><th>访问</th><th>平均停留</th></tr></thead><tbody>';
+    srcs.forEach(([src,paths])=>{
+      const top=Object.entries(paths).sort((a,b)=>b[1].c-a[1].c).slice(0,3);
+      top.forEach(([p,v],i)=>{
+        if(i===0) html+='<tr><td rowspan="'+top.length+'" title="'+esc(src)+'">'+esc(src)+'</td><td title="'+esc(p)+'">'+esc(p)+'</td><td>'+v.c+'</td><td>'+fmtDur(Math.round(v.s/v.c))+'</td></tr>';
+        else html+='<tr><td title="'+esc(p)+'">'+esc(p)+'</td><td>'+v.c+'</td><td>'+fmtDur(Math.round(v.s/v.c))+'</td></tr>';
+      });
+    });
+    html+='</tbody></table></div>';
+    el.innerHTML=html; el.hidden=false;
+  }
+
   renderStats(DATA);
+  renderTrend(DATA);
+  renderCross(DATA);
   applyFilter();
   fEl.addEventListener('input',applyFilter);
   botEl.addEventListener('change',applyFilter);
@@ -252,6 +316,7 @@ function tableHtml(rows) {
 
 export async function onRequest(context) {
   const { request, env } = context;
+  const SECRET = env.LOG_SECRET || "Abc123456Log2026";
   const url = new URL(request.url);
 
   // 退出：清除 cookie 并跳回登录
@@ -284,7 +349,7 @@ export async function onRequest(context) {
   }
 
   // 未登录 → 登录页
-  if (!isAuthed(request)) {
+  if (!isAuthed(request, SECRET)) {
     return new Response(loginHtml(false), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });

@@ -164,7 +164,7 @@ POST /api/duration  { vid, duration }  →  UPDATE visit_record SET duration=? W
 
 - **写入时机**：`waitUntil(saveLog())` 让数据库写入在后台异步完成，页面响应不被拖慢。
 - **中国时区**：`visit_time` 在写入时按 `UTC+8` 计算（Cloudflare 运行时默认 UTC，若不处理日志会慢 8 小时）。`ts` 字段另存 epoch 秒，用于稳定排序与按日期区间筛选。
-- **Cookie 关联**：中间件向浏览器下发 `pv=<visit_id>`（`Max-Age=3600`，`SameSite=Lax`），追踪脚本读取该 Cookie 拿到 `vid`，从而把停留时长**回写到同一条记录**。
+- **Cookie 关联**：中间件向浏览器下发两个 Cookie——`pv=<visit_id>`（`Max-Age=3600`，单次访问关联，追踪脚本读取它拿到 `vid` 回写停留时长）和 `uv=<访客ID>`（`Max-Age=1年`，跨页/跨会话识别独立访客）。
 - **关闭缓存**：对 HTML 响应强制 `Cache-Control: no-store`。否则边缘缓存会让重复访问不命中中间件、漏记日志。
 
 ### 7.2 记录时机与去重规则
@@ -202,6 +202,8 @@ POST /api/duration  { vid, duration }  →  UPDATE visit_record SET duration=? W
 | `client` | TEXT | 客户端短标签（微信 / 钉钉 / iOS / Chrome…） | UA 解析 |
 | `source` | TEXT | 渠道归因（utm 来源 / IM 来源 / 直接访问） | URL + UA + referer |
 | `is_bot` | INTEGER | 是否爬虫（1 = 是，0 = 否） | UA 匹配规则 |
+| `uv_id` | TEXT | 访客唯一 ID（第一方 Cookie `uv`，跨页/跨会话稳定，用于独立访客与回访识别） | `crypto.randomUUID()` / Cookie |
+| `is_new` | INTEGER | 是否新客（该 `uv_id` 首次在库中出现 = 1，回访 = 0） | 写入时 `COUNT(*)` 判断 |
 
 **派生字段的解析逻辑**（均在 `_middleware.js` 内）：
 
@@ -218,14 +220,16 @@ POST /api/duration  { vid, duration }  →  UPDATE visit_record SET duration=? W
 
 - **登录**：提交密钥 → 服务端下发 `HttpOnly` Cookie `auth=<密钥>`（`Max-Age=86400`，24 小时）。
 - **退出**：访问 `/logs?logout=1` 清除 Cookie 并跳回登录页。
-- **概览卡片**：总访问、独立访客（按 IP 去重）、平均停留（仅统计有停留的访问）。
+- **概览卡片**：总访问、独立访客（按 `uv` 访客 Cookie 去重，比按 IP 更准）、新客（首次到访）、回访、平均停留（仅统计有停留的访问）。
+- **趋势图**：近 14 天访问趋势。
+- **渠道×落地页交叉分析**：各渠道 Top 落地页的访问数 / 平均停留，可看出「哪个渠道真正读进去了、读了哪几页」。
 - **热门榜单**：热门页面 Top5、热门渠道 Top5。
 - **明细表**：列含 `# / 时间 / 停留 / 路径 / 渠道 / 省 / 市 / 客户端 / 来源`。
 - **前端筛选**：路径搜索框、「隐藏机器人」、「仅有效访问（有停留）」复选框；数据已内联（最多 1000 条），筛选/导出均在浏览器端完成，无需额外接口。
 
 #### ② JSON 接口 `/api/log-list?token=Abc123456Log2026`
 
-- 鉴权：URL 查询参数 `token`（与网页密钥相同）。
+- 鉴权：URL 查询参数 `token`（默认等于网页密钥；若设置了 `LOG_SECRET` 环境变量则取其值）。
 - 返回：最近 **100** 条记录（`ORDER BY visit_time DESC LIMIT 100`），结构 `{ code, total, list }`。
 - 适用：自动化脚本、外接看板。`code=403` 表示 token 错误，`code=500` 表示数据库异常。
 
@@ -270,14 +274,20 @@ curl "https://chkj001.20302060.xyz/api/log-list?token=Abc123456Log2026"
 
 ### 7.6 筛选与统计口径
 
-- **独立访客**：按 `visitor_ip` 去重计数（同一 NAT/公司出口可能合并，属预期）。
+- **独立访客**：按第一方 Cookie `uv`（`uv_id`）去重；旧数据无 `uv_id` 时回退按 `visitor_ip` 统计。比按 IP 去重更准——同一 NAT/公司出口不再把多人误并，移动网络换 IP 也不再误分。
 - **平均停留**：仅对 `duration > 0` 的记录求平均，避免大量 0 值拉低。
 - **仅有效访问**：`duration > 0`，即真正打开并停留过的访问（可过滤掉预览/秒退）。
 
 ### 7.7 安全与运维
 
-- **密钥硬编码**：`logs.js`、`api/log-list.js`、`api/export-csv.js` 中硬编码了日志密钥 `Abc123456Log2026`；`wrangler.toml` 含 D1 `database_id`。当前仓库为**私有**，风险可控。
-- **公开化前必做**：若日后转为公开仓库，请将密钥改为 Cloudflare Secret（或环境变量注入），不要入库明文。
+- **密钥来源（环境变量优先）**：`logs.js`、`api/log-list.js`、`api/export-csv.js` 现均读取 `env.LOG_SECRET`；未设置时回退到代码内兜底值 `Abc123456Log2026`（保证本地 `wrangler pages dev` 无配置即可测试）。**公开仓库或正式上线前，请在 Cloudflare 侧设置 `LOG_SECRET` 为强随机值以覆盖兜底值**：
+  1. CF Dashboard → 项目 **Settings → Environment variables → Production → Add variable**，名 `LOG_SECRET`，值为强随机密钥，勾选 **Encrypt**（存为 Secret）。
+  2. 设好后 `/logs` 登录密钥、`/api/log-list` 的 token 均改为该值；此前下发的旧 `auth` Cookie 不再匹配（视为未登录）。
+- **首次上线 uv 追踪列的迁移**：`schema.sql` 只对新库生效；**已部署的线上库需单独执行一次**：
+  ```bash
+  npx wrangler d1 execute chzckj_visit_log --remote --file=./migrations/20260901_uv_tracking.sql
+  ```
+  内容：`ALTER TABLE visit_record ADD COLUMN uv_id TEXT;`、`ADD COLUMN is_new INTEGER DEFAULT 0;`、`CREATE INDEX idx_visit_record_uv_id`（本次已执行）。
 - **清理测试数据**：如需删除某条记录（如调试残留），用 Wrangler 直连 D1：
   ```bash
   export XDG_CONFIG_HOME="C:/Users/qiao/AppData/Roaming/xdg.config"
