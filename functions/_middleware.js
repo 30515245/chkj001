@@ -190,7 +190,7 @@ export async function onRequest(context) {
   if (ct.includes("text/html")) {
     const html = await resp.text();
     if (!html.includes("__SNS_TRACK__")) {
-      const tracker = `<script>/*__SNS_TRACK__*/(function(){try{var vid=(document.cookie.match(/(?:^|;\\s*)pv=([^;]+)/)||[])[1];if(!vid)return;var s=Date.now(),d=false;function r(){if(d)return;d=true;var e=Math.max(0,Math.round((Date.now()-s)/1000));try{navigator.sendBeacon('/api/duration',new Blob([JSON.stringify({vid:vid,duration:e})],{type:'application/json'}))}catch(x){}}}window.addEventListener('pagehide',r);document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden')r()})}catch(e){})();</script>`;
+      const tracker = `<script>/*__SNS_TRACK__*/(function(){try{var m=document.cookie.match(/(?:^|;\\s*)pv=([^;]+)/);var vid=m&&m[1];if(!vid)return;var s=Date.now(),sent=0,done=false;function send(){if(done)return;var seg=Math.round((Date.now()-s)/1000);if(seg<=0)return;s=Date.now();sent+=seg;var p=JSON.stringify({vid:vid,duration:sent});try{if(navigator.sendBeacon){navigator.sendBeacon('/api/duration',new Blob([p],{type:'application/json'}));return;}}catch(e){}try{fetch('/api/duration',{method:'POST',headers:{'Content-Type':'application/json'},body:p,keepalive:true});}catch(e){}}document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'){send();}else{s=Date.now();}});window.addEventListener('pagehide',function(){send();done=true;});}catch(e){}})();</script>`;
       const out = html.replace("</body>", tracker + "\n</body>");
       const h = new Headers(resp.headers);
       h.set("content-type", ct);
