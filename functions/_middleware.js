@@ -86,6 +86,8 @@ export async function onRequest(context) {
     if (/wxwork|EnterpriseWeChat/i.test(ua)) return "企业微信";
     if (/QQ\//i.test(ua)) return "QQ";
     if (/Weibo/i.test(ua)) return "微博";
+    // 华为鸿蒙(OpenHarmony)内嵌浏览器(ArkWeb)的 UA 不写 Android/iOS，需在 Chrome 之前单独识别
+    if (/OpenHarmony|HarmonyOS|ArkWeb/i.test(ua)) return "鸿蒙";
     if (/iPhone|iPad|iPod/i.test(ua)) return "iOS";
     if (/Android/i.test(ua)) return "Android";
     if (/Windows/i.test(ua)) return "Windows";
