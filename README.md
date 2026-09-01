@@ -175,6 +175,7 @@ POST /api/duration  { vid, duration }  →  UPDATE visit_record SET duration=? W
 |---|---|
 | 路径以 `.css/.js/.png/.jpg/.gif/.ico/.svg/.woff/.ttf` 结尾 | 静态资源不算页面访问 |
 | 路径以 `/api/` 开头 | 停留时长上报等接口本身不是页面访问 |
+| 路径为 `/logs` | 运营者后台查看/登录/退出页，属运营动作，不入访问统计 |
 | 路径以 `.html` 结尾 | Cloudflare Pages 会把 `/xxx.html` 永久 **308 重定向**到 `/xxx`；若此处也记录，重定向前后会产生两条重复日志。故跳过 `.html`，由重定向后的干净 URL 统一记录一次 |
 
 > 因此站点内导航虽使用 `page-1.html` 这类链接，实际被记录的是去 `.html` 后的干净路径（如 `/page-1`）。

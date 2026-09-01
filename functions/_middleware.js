@@ -16,6 +16,10 @@ export async function onRequest(context) {
   if (url.pathname.endsWith(".html")) {
     return context.next();
   }
+  // 后台查看页 /logs 及其登录/退出，属于运营动作，不入访问统计
+  if (url.pathname === "/logs") {
+    return context.next();
+  }
 
   // 读取CF原生全部访客信息
   const headers = request.headers;
