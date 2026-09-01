@@ -157,8 +157,13 @@ export async function onRequest(context) {
     try {
       await env.DB.prepare(`
       INSERT INTO visit_record
-      (visit_url, visit_path, visitor_ip, user_agent, country, region, city, timezone, referer, visit_time, visit_id, ts, client, source, is_bot)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (visit_url, visit_path, visitor_ip, user_agent, country, region, city, timezone, referer, visit_time, visit_id, ts, client, source, is_bot, duration)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+      ON CONFLICT(visit_id) DO UPDATE SET
+        visit_url=excluded.visit_url, visit_path=excluded.visit_path, visitor_ip=excluded.visitor_ip,
+        user_agent=excluded.user_agent, country=excluded.country, region=excluded.region, city=excluded.city,
+        timezone=excluded.timezone, referer=excluded.referer, visit_time=excluded.visit_time,
+        ts=excluded.ts, client=excluded.client, source=excluded.source, is_bot=excluded.is_bot
       `)
         .bind(
           logData.visit_url,
@@ -190,7 +195,7 @@ export async function onRequest(context) {
   if (ct.includes("text/html")) {
     const html = await resp.text();
     if (!html.includes("__SNS_TRACK__")) {
-      const tracker = `<script>/*__SNS_TRACK__*/(function(){try{var m=document.cookie.match(/(?:^|;\\s*)pv=([^;]+)/);var vid=m&&m[1];if(!vid)return;var s=Date.now(),sent=0,done=false;function send(){if(done)return;var seg=Math.round((Date.now()-s)/1000);if(seg<=0)return;s=Date.now();sent+=seg;var p=JSON.stringify({vid:vid,duration:sent});try{fetch('/api/duration',{method:'POST',headers:{'Content-Type':'application/json'},body:p,keepalive:true});return;}catch(e){}try{if(navigator.sendBeacon){navigator.sendBeacon('/api/duration',new Blob([p],{type:'application/json'}));}}catch(e){}}document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'){send();}else{s=Date.now();}});window.addEventListener('pagehide',function(){send();done=true;});window.addEventListener('beforeunload',function(){send();});}catch(e){}})();</script>`;
+      const tracker = `<script>/*__SNS_TRACK__*/(function(){try{var m=document.cookie.match(/(?:^|;\\s*)pv=([^;]+)/);var vid=m&&m[1];if(!vid)return;var s=Date.now(),sent=0,done=false;function send(){if(done)return;var seg=Math.round((Date.now()-s)/1000);if(seg<=0)return;s=Date.now();sent+=seg;var p=JSON.stringify({vid:vid,duration:sent});try{if(navigator.sendBeacon){navigator.sendBeacon('/api/duration',new Blob([p],{type:'application/json'}));return;}}catch(e){}try{fetch('/api/duration',{method:'POST',headers:{'Content-Type':'application/json'},body:p,keepalive:true});}catch(e){}}document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'){send();}else{s=Date.now();}});window.addEventListener('pagehide',function(){send();done=true;});window.addEventListener('beforeunload',function(){send();});}catch(e){}})();</script>`;
       const out = html.replace("</body>", tracker + "\n</body>");
       const h = new Headers(resp.headers);
       h.set("content-type", ct);
